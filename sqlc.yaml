@@ -1,0 +1,10 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "db/migrations" # ✅ Updated to match your actual goose directory
+    queries: "db/queries" # where we write raw SQL
+    gen:
+      go:
+        package: "db"
+        out: "internal/db" # target destination for generated Go files
+        sql_package: "pgx/v5" # configures it to use the modern pgx driver
