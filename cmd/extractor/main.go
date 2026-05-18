@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,12 +33,12 @@ type QuestionGroup struct {
 
 // Question is the structure that holds the extracted question data
 type Question struct {
+	RefNo             string   `json:"ref_no"`
 	Subject           string   `json:"subject"`
 	Topic             string   `json:"topic"`
 	ReferencesDiagram bool     `json:"references_diagram"`
 	QuestionText      string   `json:"question_text"`
 	CorrectChoice     string   `json:"correct_choice"` // Answer key lives here
-	Explanation       string   `json:"explanation"`
 	Choices           []Choice `json:"choices"`
 }
 
@@ -48,6 +49,8 @@ type Choice struct {
 }
 
 func main() {
+	startTime := time.Now()
+
 	//Load the .env file at app startup
 	if err := godotenv.Overload(); err != nil {
 		log.Println("No .env file found")
@@ -84,7 +87,7 @@ func main() {
 		log.Fatalf("Unable to initialize Gemini client: %v", err)
 	}
 
-	dataDir := "/home/rolanveroncruz/aStar/reviewer_data/drive-download-20250623T051433Z-1-001/UPCAT (UP)"
+	dataDir := "/home/rolanveroncruz/aStar/reviewer_data"
 	var allFiles []string
 
 	err = filepath.WalkDir(dataDir, func(path string, d os.DirEntry, err error) error {
@@ -104,20 +107,22 @@ func main() {
 	// ==================================================================
 	// 🧪 TEST RUN LIMITER: TAKE ONLY THE FIRST 6 FILES (2 ROUNDS FOR 3 WORKERS)
 	// ==================================================================
-	if len(allFiles) > 6 {
-		fmt.Printf("🔬 Test Mode: Truncating total files from %d down to 6.\n", len(allFiles))
-		allFiles = allFiles[:6]
-	}
-	// ==================================================================
+	/*	if len(allFiles) > 6 {
+			fmt.Printf("🔬 Test Mode: Truncating total files from %d down to 6.\n", len(allFiles))
+			allFiles = allFiles[:6]
+		}
+	*/ // ==================================================================
+	var failedFiles []string
+	var mu sync.Mutex
 
 	// Channel configuration for pipeline coordination
-	numWorkers := 3 // Adjust based on API rate limit tier
+	numWorkers := 10 // Adjust based on API rate limit tier
 	jobs := make(chan string, len(allFiles))
 	var wg sync.WaitGroup
 
 	for w := 1; w <= numWorkers; w++ {
 		wg.Add(1)
-		go worker(ctx, client, queries, promptText, jobs, &wg)
+		go worker(ctx, client, queries, promptText, jobs, &wg, &failedFiles, &mu)
 	}
 
 	//Enqueue all files
@@ -128,12 +133,36 @@ func main() {
 	close(jobs)
 
 	wg.Wait()
-	fmt.Println("\n Processing complete!")
+	endTime := time.Now()
+	duration := time.Since(startTime)
+	// ==================================================================
+	// ✅ FINAL PIPELINE AUDIT REPORT
+	// ==================================================================
+	fmt.Println("\n==================================================")
+	fmt.Println("🎉 Processing complete!")
+	fmt.Println("==================================================")
+	fmt.Printf("📅 Started at:  %s\n", startTime.Format("2006-01-02 15:04:05 MST")) // ✅
+	fmt.Printf("📅 Ended at:    %s\n", endTime.Format("2006-01-02 15:04:05 MST"))   // ✅
+	fmt.Printf("⏱️ Total Execution Time: %v\n", duration)                          // ✅
+	fmt.Println("==================================================")
+
+	if len(failedFiles) == 0 {
+		fmt.Println("✨ Flawless Run! All processed files extracted completely.")
+	} else {
+		fmt.Printf("❌ The following %d files exceeded output token boundaries:\n", len(failedFiles))
+		for _, file := range failedFiles {
+			fmt.Printf("  • %s\n", file)
+		}
+		fmt.Println("\n💡 Next step: Split these specific PDFs and run the tool again.")
+	}
+	fmt.Println("==================================================")
 }
-func worker(ctx context.Context, client *genai.Client, queries *db.Queries, promptText string, jobs <-chan string, wg *sync.WaitGroup) {
+
+func worker(ctx context.Context, client *genai.Client, queries *db.Queries, promptText string,
+	jobs <-chan string, wg *sync.WaitGroup, failedFiles *[]string, mu *sync.Mutex) {
 	defer wg.Done()
 	for path := range jobs {
-		err := processFile(ctx, client, queries, promptText, path)
+		err := processFile(ctx, client, queries, promptText, path, failedFiles, mu)
 		if err != nil {
 			fmt.Printf("Failed [%s]: %v\n", filepath.Base(path), err)
 		}
@@ -141,11 +170,48 @@ func worker(ctx context.Context, client *genai.Client, queries *db.Queries, prom
 	}
 }
 
-func processFile(ctx context.Context, client *genai.Client, queries *db.Queries, promptText string, filePath string) error {
+func processFile(ctx context.Context, client *genai.Client, queries *db.Queries,
+	promptText string, filePath string, failedFiles *[]string, mu *sync.Mutex) error {
+
+	// ==================================================================
+	// ✅ FORCE ABSOLUTE PATH TO INSULATE STRUCTURAL MATCHING
+	// ==================================================================
+	absPath, err := filepath.Abs(filePath) //  Added line
+	if err != nil {                        //  Added line
+		return fmt.Errorf("failed to get absolute path: %w", err) //  Added line
+	}
 	fileName := filepath.Base(filePath)
 
+	// ==================================================================
+	//  DYNAMIC LEFT-TO-RIGHT PATH EXTRACTOR
+	// ==================================================================
+	cleanPath := filepath.Clean(absPath)
+	parts := strings.Split(cleanPath, string(filepath.Separator))
+	motherFolder := "unknown"
+
+	for i, part := range parts {
+		if part == "reviewer_data" && i+2 < len(parts) {
+			motherFolder = parts[i+2]
+			break
+		}
+	}
+	// ==================================================================
+	//  FETCH FILE SIZE METADATA
+	// ==================================================================
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read file stats: %w", err)
+	}
+	fileSizeBytes := fileInfo.Size()
+	// ==================================================================
+
 	//--- 1. Resume Logic: Check or create the source tracker
-	source, err := queries.UpsertSource(ctx, fileName)
+	source, err := queries.UpsertSource(ctx, db.UpsertSourceParams{
+		FileName:      fileName,
+		FilePath:      filePath,
+		MotherFolder:  motherFolder,
+		FileSizeBytes: fileSizeBytes,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to upsert source: %w", err)
 	}
@@ -159,9 +225,32 @@ func processFile(ctx context.Context, client *genai.Client, queries *db.Queries,
 	fmt.Printf("Processing [%s]...\n", fileName)
 
 	//---3. Extract Data via Gemini
-	data, err := extractDataFromGemini(ctx, client, promptText, filePath)
+	//---3a. Set up retry parameters
+	var data *ExtractedData
+	maxRetries := 3
+	backoff := 4 * time.Second
+
+	for i := 0; i < maxRetries; i++ {
+		data, err = extractDataFromGemini(ctx, client, promptText, filePath)
+		if err == nil {
+			break // Success!
+		}
+		fmt.Printf("⚠️ Attempt %d failed for [%s]: %v. Retrying in %v...\n", i+1, fileName, err, backoff)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+			backoff *= 2
+		}
+	}
 	if err != nil {
-		return fmt.Errorf("failed to extract data: %w", err)
+		// ==============================================================
+		// ✅ SECURE MUTEX LOCK TO RECORD FAILED FILE SAFELY
+		// ==============================================================
+		mu.Lock()                                     // ✅
+		*failedFiles = append(*failedFiles, fileName) // ✅
+		mu.Unlock()                                   // ✅
+		return fmt.Errorf("failed to extract data after %d attempts: %w", maxRetries, err)
 	}
 
 	// ----4. Persist to Database
@@ -209,6 +298,7 @@ func extractDataFromGemini(ctx context.Context, client *genai.Client, promptText
 								Items: &genai.Schema{
 									Type: genai.TypeObject,
 									Properties: map[string]*genai.Schema{
+										"ref_no": {Type: genai.TypeString},
 										"subject": {
 											Type: genai.TypeString,
 											Enum: []string{"Mathematics", "Science", "Language Proficiency", "Reading Comprehension"},
@@ -217,7 +307,6 @@ func extractDataFromGemini(ctx context.Context, client *genai.Client, promptText
 										"references_diagram": {Type: genai.TypeBoolean},
 										"question_text":      {Type: genai.TypeString},
 										"correct_choice":     {Type: genai.TypeString},
-										"explanation":        {Type: genai.TypeString},
 										"choices": {
 											Type: genai.TypeArray,
 											Items: &genai.Schema{
@@ -230,7 +319,7 @@ func extractDataFromGemini(ctx context.Context, client *genai.Client, promptText
 											},
 										},
 									},
-									Required: []string{"subject", "topic", "question_text", "correct_choice"},
+									Required: []string{"ref_no", "subject", "topic", "question_text", "correct_choice"},
 								},
 							},
 						},
@@ -244,8 +333,8 @@ func extractDataFromGemini(ctx context.Context, client *genai.Client, promptText
 
 	// ✅✅✅ FULLY STRICT POINTER SYNTAX ✅✅✅
 	resp, err := client.Models.GenerateContent(ctx, "gemini-2.5-flash",
-		[]*genai.Content{ // Added *
-			{ // Added &
+		[]*genai.Content{
+			&genai.Content{ // Added &
 				Role: "user",
 				Parts: []*genai.Part{ // Added *
 					{FileData: &genai.FileData{FileURI: uploadedFile.URI, MIMEType: uploadedFile.MIMEType}}, // Added &
@@ -316,10 +405,10 @@ func saveExtractionToDB(ctx context.Context, queries *db.Queries, sourceID int64
 				SubjectID:            subjectID,
 				TopicID:              pgtype.Int8{Int64: topicID, Valid: true},
 				InstructionContextID: instructionContextID, // Automatically NULL if group had no text
+				RefNo:                q.RefNo,
 				ReferencesDiagram:    q.ReferencesDiagram,
 				QuestionText:         q.QuestionText,
 				CorrectChoice:        q.CorrectChoice,
-				Explanation:          q.Explanation,
 			})
 			if err != nil {
 				continue

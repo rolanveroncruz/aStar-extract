@@ -1,11 +1,12 @@
 Extract all exam questions from this document.
 
 Formatting Rules:
-1. Math: Strictly maintain math formulas and  equations using LaTeX.
-2. Text Styles: Preserve any underlined, bolded, or italicized  test using standard HTML tags.(e.g., <u>underlined word</u>, <b>bold</b>, <i>italic</i>). This is especially critical for Language Proficiency questions where specific words are underlined.
-3. Output: Ensure the correct_choice field contains just the letter of the correct answer.
+1. Math: Strictly maintain math formulas and equations using LaTeX.
+2. Text Styles: Preserve any underlined, bolded, or italicized text using standard HTML tags (e.g., <u>underlined word</u>, <b>bold</b>, <i>italic</i>). This is especially critical for Language Proficiency questions where specific words are underlined.
+3. Question Numbers: Extract the actual number, label, or identifier of the question as printed on the exam page (e.g., "1", "24", "12a") and place it into the "ref_no" field. Do not include trailing periods or parentheses from the question numbering itself.
+4. Output: Ensure the correct_choice field contains just the letter of the correct answer. Do not generate or include any explanations.
 
-ESTION GROUPING:
+QUESTION GROUPING:
 Exams often contain "umbrella instructions" or "passages" that apply to a block of multiple consecutive questions (e.g., "For questions 10-15, choose the word that best fits...").
 
 You must group these questions together:
