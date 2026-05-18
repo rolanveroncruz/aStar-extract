@@ -32,21 +32,28 @@ type DerivedQuestion struct {
 	CreatedAt          pgtype.Timestamp
 }
 
+type InstructionContext struct {
+	ID          int64
+	SourceID    int64
+	ContextText string
+}
+
 type LevelType struct {
 	ID        int64
 	LevelType string
 }
 
 type Question struct {
-	ID                int64
-	SourceID          int64
-	SubjectID         int64
-	TopicID           pgtype.Int8
-	ReferencesDiagram bool
-	QuestionText      string
-	CorrectChoice     string
-	Explanation       string
-	CreatedAt         pgtype.Timestamp
+	ID                   int64
+	SourceID             int64
+	InstructionContextID pgtype.Int8
+	SubjectID            int64
+	TopicID              pgtype.Int8
+	ReferencesDiagram    bool
+	QuestionText         string
+	CorrectChoice        string
+	Explanation          string
+	CreatedAt            pgtype.Timestamp
 }
 
 type Source struct {

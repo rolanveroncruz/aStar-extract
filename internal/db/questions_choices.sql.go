@@ -41,26 +41,28 @@ func (q *Queries) CreateChoice(ctx context.Context, arg CreateChoiceParams) erro
 
 const createQuestion = `-- name: CreateQuestion :one
 INSERT INTO questions (
-    source_id, subject_id, topic_id, references_diagram, question_text, correct_choice, explanation
+    source_id, subject_id, instruction_context_id, topic_id, references_diagram, question_text, correct_choice, explanation
 ) VALUES (
-             $1, $2, $3, $4, $5, $6, $7
+             $1, $2, $3, $4, $5, $6, $7, $8
          ) RETURNING id
 `
 
 type CreateQuestionParams struct {
-	SourceID          int64
-	SubjectID         int64
-	TopicID           pgtype.Int8
-	ReferencesDiagram bool
-	QuestionText      string
-	CorrectChoice     string
-	Explanation       string
+	SourceID             int64
+	SubjectID            int64
+	InstructionContextID pgtype.Int8
+	TopicID              pgtype.Int8
+	ReferencesDiagram    bool
+	QuestionText         string
+	CorrectChoice        string
+	Explanation          string
 }
 
 func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) (int64, error) {
 	row := q.db.QueryRow(ctx, createQuestion,
 		arg.SourceID,
 		arg.SubjectID,
+		arg.InstructionContextID,
 		arg.TopicID,
 		arg.ReferencesDiagram,
 		arg.QuestionText,

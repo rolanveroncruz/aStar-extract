@@ -1,8 +1,15 @@
 -- +goose Up
 SELECT 'up SQL query';
+create table instruction_contexts(
+    id BIGSERIAL PRIMARY KEY,
+    source_id BIGINT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    context_text TEXT NOT NULL
+);
+
 CREATE TABLE questions (
     id BIGSERIAL PRIMARY KEY,
     source_id BIGINT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    instruction_context_id BIGINT REFERENCES instruction_contexts(id) on delete SET NULL,
     subject_id BIGINT NOT NULL REFERENCES subjects(id),
     topic_id BIGINT REFERENCES topics(id), -- Optional, some questions might just have a subject
     references_diagram BOOLEAN NOT NULL DEFAULT FALSE, -- boolean to indicate if the question references a diagram

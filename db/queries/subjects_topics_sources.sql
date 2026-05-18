@@ -13,3 +13,8 @@ RETURNING id, processed_end;
 
 -- name: MarkSourceCompleted :exec
 UPDATE sources SET processed_end = NOW() WHERE id = $1;
+
+-- name: CreateInstructionContext :one
+INSERT INTO instruction_contexts (source_id, context_text)
+VALUES ($1, $2)
+RETURNING id;

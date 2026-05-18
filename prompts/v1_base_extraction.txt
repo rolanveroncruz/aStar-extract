@@ -1,0 +1,13 @@
+Extract all exam questions from this document.
+
+Formatting Rules:
+1. Math: Strictly maintain math formulas and  equations using LaTeX.
+2. Text Styles: Preserve any underlined, bolded, or italicized  test using standard HTML tags.(e.g., <u>underlined word</u>, <b>bold</b>, <i>italic</i>). This is especially critical for Language Proficiency questions where specific words are underlined.
+3. Output: Ensure the correct_choice field contains just the letter of the correct answer.
+
+ESTION GROUPING:
+Exams often contain "umbrella instructions" or "passages" that apply to a block of multiple consecutive questions (e.g., "For questions 10-15, choose the word that best fits...").
+
+You must group these questions together:
+1. If a block of questions shares an overarching instruction, passage, or direction, extract that text once and place it in the "instruction_text" field of the group. All relevant questions must be placed inside that group's "questions" array.
+2. If a question is entirely standalone and has its own complete context within its text, place it in a group where "instruction_text" is an empty string ("").

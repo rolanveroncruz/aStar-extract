@@ -11,6 +11,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createInstructionContext = `-- name: CreateInstructionContext :one
+INSERT INTO instruction_contexts (source_id, context_text)
+VALUES ($1, $2)
+RETURNING id
+`
+
+type CreateInstructionContextParams struct {
+	SourceID    int64
+	ContextText string
+}
+
+func (q *Queries) CreateInstructionContext(ctx context.Context, arg CreateInstructionContextParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createInstructionContext, arg.SourceID, arg.ContextText)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const markSourceCompleted = `-- name: MarkSourceCompleted :exec
 UPDATE sources SET processed_end = NOW() WHERE id = $1
 `
