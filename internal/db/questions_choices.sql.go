@@ -39,9 +39,27 @@ func (q *Queries) CreateChoice(ctx context.Context, arg CreateChoiceParams) erro
 	return err
 }
 
+const createInstructionContext = `-- name: CreateInstructionContext :one
+INSERT INTO instruction_contexts (source_id, context_text)
+VALUES ($1, $2)
+RETURNING id
+`
+
+type CreateInstructionContextParams struct {
+	SourceID    int64
+	ContextText string
+}
+
+func (q *Queries) CreateInstructionContext(ctx context.Context, arg CreateInstructionContextParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createInstructionContext, arg.SourceID, arg.ContextText)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createQuestion = `-- name: CreateQuestion :one
 INSERT INTO questions (
-    source_id, subject_id, instruction_context_id, topic_id, references_diagram, question_text, correct_choice, explanation
+    source_id, subject_id, topic_id, instruction_context_id, ref_no, references_diagram, question_text, correct_choice
 ) VALUES (
              $1, $2, $3, $4, $5, $6, $7, $8
          ) RETURNING id
@@ -50,24 +68,24 @@ INSERT INTO questions (
 type CreateQuestionParams struct {
 	SourceID             int64
 	SubjectID            int64
-	InstructionContextID pgtype.Int8
 	TopicID              pgtype.Int8
+	InstructionContextID pgtype.Int8
+	RefNo                string
 	ReferencesDiagram    bool
 	QuestionText         string
 	CorrectChoice        string
-	Explanation          string
 }
 
 func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) (int64, error) {
 	row := q.db.QueryRow(ctx, createQuestion,
 		arg.SourceID,
 		arg.SubjectID,
-		arg.InstructionContextID,
 		arg.TopicID,
+		arg.InstructionContextID,
+		arg.RefNo,
 		arg.ReferencesDiagram,
 		arg.QuestionText,
 		arg.CorrectChoice,
-		arg.Explanation,
 	)
 	var id int64
 	err := row.Scan(&id)

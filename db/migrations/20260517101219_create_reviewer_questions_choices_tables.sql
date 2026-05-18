@@ -12,6 +12,7 @@ CREATE TABLE questions (
     instruction_context_id BIGINT REFERENCES instruction_contexts(id) on delete SET NULL,
     subject_id BIGINT NOT NULL REFERENCES subjects(id),
     topic_id BIGINT REFERENCES topics(id), -- Optional, some questions might just have a subject
+    ref_no TEXT NOT NULL, -- Track document question's reference number
     references_diagram BOOLEAN NOT NULL DEFAULT FALSE, -- boolean to indicate if the question references a diagram
     question_text TEXT NOT NULL,
     correct_choice TEXT NOT NULL,

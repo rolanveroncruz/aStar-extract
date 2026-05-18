@@ -49,6 +49,7 @@ type Question struct {
 	InstructionContextID pgtype.Int8
 	SubjectID            int64
 	TopicID              pgtype.Int8
+	RefNo                string
 	ReferencesDiagram    bool
 	QuestionText         string
 	CorrectChoice        string
@@ -59,6 +60,9 @@ type Question struct {
 type Source struct {
 	ID             int64
 	FileName       string
+	FilePath       string
+	MotherFolder   string
+	FileSizeBytes  int64
 	ProcessedStart pgtype.Timestamp
 	ProcessedEnd   pgtype.Timestamp
 }

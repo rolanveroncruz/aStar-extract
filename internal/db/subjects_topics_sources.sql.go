@@ -7,27 +7,7 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
-
-const createInstructionContext = `-- name: CreateInstructionContext :one
-INSERT INTO instruction_contexts (source_id, context_text)
-VALUES ($1, $2)
-RETURNING id
-`
-
-type CreateInstructionContextParams struct {
-	SourceID    int64
-	ContextText string
-}
-
-func (q *Queries) CreateInstructionContext(ctx context.Context, arg CreateInstructionContextParams) (int64, error) {
-	row := q.db.QueryRow(ctx, createInstructionContext, arg.SourceID, arg.ContextText)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
-}
 
 const markSourceCompleted = `-- name: MarkSourceCompleted :exec
 UPDATE sources SET processed_end = NOW() WHERE id = $1
@@ -39,20 +19,39 @@ func (q *Queries) MarkSourceCompleted(ctx context.Context, id int64) error {
 }
 
 const upsertSource = `-- name: UpsertSource :one
-INSERT INTO sources (file_name) VALUES ($1)
-ON CONFLICT (file_name) DO UPDATE SET file_name = EXCLUDED.file_name
-RETURNING id, processed_end
+INSERT INTO sources (file_name, file_path, mother_folder, file_size_bytes)
+VALUES ($1, $2, $3,$4)
+ON CONFLICT (file_name)
+    DO UPDATE SET file_path = EXCLUDED.file_path,
+                  mother_folder = EXCLUDED.mother_folder,
+                  file_size_bytes = EXCLUDED.file_size_bytes
+RETURNING id, file_name, file_path, mother_folder, file_size_bytes, processed_start, processed_end
 `
 
-type UpsertSourceRow struct {
-	ID           int64
-	ProcessedEnd pgtype.Timestamp
+type UpsertSourceParams struct {
+	FileName      string
+	FilePath      string
+	MotherFolder  string
+	FileSizeBytes int64
 }
 
-func (q *Queries) UpsertSource(ctx context.Context, fileName string) (UpsertSourceRow, error) {
-	row := q.db.QueryRow(ctx, upsertSource, fileName)
-	var i UpsertSourceRow
-	err := row.Scan(&i.ID, &i.ProcessedEnd)
+func (q *Queries) UpsertSource(ctx context.Context, arg UpsertSourceParams) (Source, error) {
+	row := q.db.QueryRow(ctx, upsertSource,
+		arg.FileName,
+		arg.FilePath,
+		arg.MotherFolder,
+		arg.FileSizeBytes,
+	)
+	var i Source
+	err := row.Scan(
+		&i.ID,
+		&i.FileName,
+		&i.FilePath,
+		&i.MotherFolder,
+		&i.FileSizeBytes,
+		&i.ProcessedStart,
+		&i.ProcessedEnd,
+	)
 	return i, err
 }
 
