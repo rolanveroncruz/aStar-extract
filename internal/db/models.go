@@ -55,6 +55,9 @@ type Question struct {
 	CorrectChoice        string
 	Explanation          string
 	CreatedAt            pgtype.Timestamp
+	IsVerified           bool
+	IsSolvable           pgtype.Bool
+	ConfidenceScore      pgtype.Numeric
 }
 
 type Source struct {
