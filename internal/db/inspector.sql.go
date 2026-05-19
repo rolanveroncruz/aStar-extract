@@ -12,16 +12,28 @@ import (
 )
 
 const getUnverifiedQuestions = `-- name: GetUnverifiedQuestions :many
-SELECT id, question_text, correct_choice
-FROM questions
-WHERE is_verified = false
-ORDER BY id ASC
+SELECT q.id,
+       q.question_text,
+        coalesce(
+            json_agg(
+                    json_build_object(
+                            'letter', c.choice_letter,
+                            'text', c.choice_text
+                    ) order by c.choice_letter ASC
+            )FILTER (where c.id IS NOT NULL),
+        '[]'::json
+        )::jsonb AS choices
+FROM questions q
+LEFT JOIN choices c ON q.id = c.question_id
+WHERE q.is_verified = false
+GROUP BY q.id
+ORDER BY q.id ASC
 `
 
 type GetUnverifiedQuestionsRow struct {
-	ID            int64
-	QuestionText  string
-	CorrectChoice string
+	ID           int64
+	QuestionText string
+	Choices      []byte
 }
 
 func (q *Queries) GetUnverifiedQuestions(ctx context.Context) ([]GetUnverifiedQuestionsRow, error) {
@@ -33,7 +45,7 @@ func (q *Queries) GetUnverifiedQuestions(ctx context.Context) ([]GetUnverifiedQu
 	var items []GetUnverifiedQuestionsRow
 	for rows.Next() {
 		var i GetUnverifiedQuestionsRow
-		if err := rows.Scan(&i.ID, &i.QuestionText, &i.CorrectChoice); err != nil {
+		if err := rows.Scan(&i.ID, &i.QuestionText, &i.Choices); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

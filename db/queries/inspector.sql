@@ -1,8 +1,20 @@
 -- name: GetUnverifiedQuestions :many
-SELECT id, question_text, correct_choice
-FROM questions
-WHERE is_verified = false
-ORDER BY id ASC;
+SELECT q.id,
+       q.question_text,
+        coalesce(
+            json_agg(
+                    json_build_object(
+                            'letter', c.choice_letter,
+                            'text', c.choice_text
+                    ) order by c.choice_letter ASC
+            )FILTER (where c.id IS NOT NULL),
+        '[]'::json
+        )::jsonb AS choices
+FROM questions q
+LEFT JOIN choices c ON q.id = c.question_id
+WHERE q.is_verified = false
+GROUP BY q.id
+ORDER BY q.id ASC;
 
 -- name: UpdateQuestionVerification :exec
 UPDATE questions
