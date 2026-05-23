@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sync"        // ✅ Added for synchronization
-	"sync/atomic" // ✅ Added for thread-safe progress incrementing
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -17,7 +18,7 @@ import (
 	"google.golang.org/genai"
 )
 
-// SolverResponse models the expected structured output from gemini-2.5-pro
+// SolverResponse models the expected structured output from gemini-2.5-flash
 type SolverResponse struct {
 	IsSolvable      bool    `json:"is_solvable"`
 	SolvedChoice    string  `json:"solved_choice"`
@@ -51,8 +52,17 @@ func main() {
 	defer pool.Close()
 	queries := db.New(pool)
 
+	/* =================================================================
+	   Route Client through the Free Tier Inspector API Key
+	   ================================================================= */
+	inspectorKey := os.Getenv("INSPECTOR_API_KEY")
+	if inspectorKey == "" {
+		log.Fatal("INSPECTOR_API_KEY environment variable is not set in .env")
+	}
+
 	// 2. Initialize the modern Google GenAI SDK Client
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:  inspectorKey,
 		Backend: genai.BackendGeminiAPI,
 	})
 	if err != nil {
@@ -69,60 +79,83 @@ func main() {
 
 	startTime := time.Now()
 
-	/* ✅ =================================================================
-	   ✅ NEW: Worker Pool Initialization Infrastructure
-	   ✅ ================================================================= */
-	var completedCount int64 = 0                                    // ✅ Thread-safe completion index
-	numWorkers := 3                                                 // ✅ Conservative safety throttle against 429 errors
-	jobs := make(chan db.GetUnverifiedQuestionsRow, totalQuestions) // ✅ Channel to distribute items
-	var wg sync.WaitGroup                                           // ✅ Controls smooth master routine completion block
+	/* =================================================================
+	   Worker Pool Initialization Infrastructure
+	   ================================================================= */
+	var completedCount int64 = 0
+	numWorkers := 2 // Free Tier Pacing: 2 workers
+	jobs := make(chan db.GetUnverifiedQuestionsRow, totalQuestions)
+	var wg sync.WaitGroup
 
-	// ✅ Seed the jobs pipeline channel buffer completely upfront
-	for _, q := range backlog { // ✅
-		jobs <- q // ✅
-	} // ✅
-	close(jobs) // ✅ Secure channel input state
+	// Seed the 'jobs' pipeline channel buffer completely upfront
+	for _, q := range backlog {
+		jobs <- q
+	}
+	close(jobs)
 
-	fmt.Printf("🚀 Spawning %d parallel inspector workers...\n", numWorkers) // ✅
+	fmt.Printf("🚀 Spawning %d parallel inspector workers...\n", numWorkers)
 
-	// ✅ Spawn worker threads to consume the queue concurrently
-	for w := 1; w <= numWorkers; w++ { // ✅
-		wg.Add(1)               // ✅
-		go func(workerID int) { // ✅
-			defer wg.Done() // ✅
+	// Spawn worker threads to consume the queue concurrently
+	for w := 1; w <= numWorkers; w++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
 
 			// Workers sequentially consume available rows off the shared channel buffer
-			for q := range jobs { // ✅
-				/* ✅ =================================================================
-				   ✅ NEW: Dynamic Thread-Safe ETA Calculation
-				   ✅ ================================================================= */
-				currentCompleted := atomic.AddInt64(&completedCount, 1) // ✅ Safely fetch current step index
+			for q := range jobs {
+				/* =================================================================
+				   Dynamic Thread-Safe ETA Calculation
+				   ================================================================= */
+				currentCompleted := atomic.AddInt64(&completedCount, 1)
 
-				var etaDisplay string     // ✅
-				if currentCompleted > 1 { // ✅
-					elapsed := time.Since(startTime)                                  // ✅
-					avgTimePerQuestion := elapsed / time.Duration(currentCompleted-1) // ✅
-					remainingQuestions := int(totalQuestions) - int(currentCompleted) // ✅
-					eta := avgTimePerQuestion * time.Duration(remainingQuestions)     // ✅
-					etaDisplay = fmt.Sprintf("ETA: %v", eta.Round(time.Second))       // ✅
-				} else { // ✅
-					etaDisplay = "ETA: calculating..." // ✅
-				} // ✅
+				var etaDisplay string
+				if currentCompleted > 1 {
+					elapsed := time.Since(startTime)
+					avgTimePerQuestion := elapsed / time.Duration(currentCompleted-1)
+					remainingQuestions := int(totalQuestions) - int(currentCompleted)
+					eta := avgTimePerQuestion * time.Duration(remainingQuestions)
+					etaDisplay = fmt.Sprintf("ETA: %v", eta.Round(time.Second))
+				} else {
+					etaDisplay = "ETA: calculating..."
+				}
 
 				evaluationPayload := fmt.Sprintf("Question Text:\n%s\n\nChoices:\n%s", q.QuestionText, string(q.Choices))
 
-				// Execute the heavy reasoning task via Gemini API
-				result, err := evaluateQuestionWithPro(ctx, client, systemInstructions, evaluationPayload)
-				if err != nil {
-					// ✅ Clean unified logging prevents interleaved console text corruption
-					fmt.Printf("[%d/%d] ❌ Worker %d - Question ID %d Error: %v\n", currentCompleted, totalQuestions, workerID, q.ID, err) // ✅
-					time.Sleep(2 * time.Second)
+				/* =================================================================
+				   Retry Loop with Automated Daily Quota Back-off and Macro-Sleep
+				   ================================================================= */
+				var result *SolverResponse
+				var evalErr error
+
+				for {
+					result, evalErr = evaluateQuestionWithPro(ctx, client, systemInstructions, evaluationPayload)
+					if evalErr != nil {
+						if strings.Contains(evalErr.Error(), "RESOURCE_EXHAUSTED") {
+							waitTime := 12 * time.Hour // Safe rest window for daily limits
+							fmt.Printf("[%d/%d] ⚠️ Quota Exhausted! Worker %d entering macro-sleep for %v...\n",
+								currentCompleted, totalQuestions, workerID, waitTime)
+							time.Sleep(waitTime)
+							continue // Retries the EXACT SAME question again
+						}
+
+						// Standard API error handling
+						fmt.Printf("[%d/%d] ❌ Worker %d - Question ID %d Error: %v\n", currentCompleted, totalQuestions, workerID, q.ID, evalErr)
+						time.Sleep(2 * time.Second)
+						break // Breaks the retry loop on normal errors to move to the next question
+					}
+					break // Success! Break the retry loop to proceed to the database save
+				}
+
+				// If it was a standard non-quota error, skip the database update entirely
+				if evalErr != nil {
+					time.Sleep(10 * time.Second) // Maintain free tier pacing even after an error
 					continue
 				}
 
 				var confNumeric pgtype.Numeric
 				if err := confNumeric.Scan(fmt.Sprintf("%.3f", result.ConfidenceScore)); err != nil {
-					fmt.Printf("[%d/%d] ❌ Worker %d - Precision Failure: %v\n", currentCompleted, totalQuestions, workerID, err) // ✅
+					fmt.Printf("[%d/%d] ❌ Worker %d - Precision Failure: %v\n", currentCompleted, totalQuestions, workerID, err)
+					time.Sleep(10 * time.Second)
 					continue
 				}
 
@@ -140,20 +173,19 @@ func main() {
 				})
 
 				if err != nil {
-					fmt.Printf("[%d/%d] ❌ Worker %d - DB Save Failed: %v\n", currentCompleted, totalQuestions, workerID, err) // ✅
+					fmt.Printf("[%d/%d] ❌ Worker %d - DB Save Failed: %v\n", currentCompleted, totalQuestions, workerID, err)
 				} else {
-					// ✅ Clean unified success line output includes the live ETA metric
-					fmt.Printf("[%d/%d] ID %d | %s | Solved: %s | Solvable: %t | Conf: %.2f | Worker %d\n", // ✅
-						currentCompleted, totalQuestions, q.ID, etaDisplay, finalChoice, result.IsSolvable, result.ConfidenceScore, workerID) // ✅
+					fmt.Printf("[%d/%d] ID %d | %s | Solved: %s | Solvable: %t | Conf: %.2f | Worker %d\n",
+						currentCompleted, totalQuestions, q.ID, etaDisplay, finalChoice, result.IsSolvable, result.ConfidenceScore, workerID)
 				}
 
-				// ✅ Removed the heavy 5-second sleep block.
-				// ✅ Natural API latency of gemini-2.5-pro across 3 workers provides safe rate pacing.
+				// Free Tier Pacing: 10 seconds (Keeps max throughput to ~12 RPM safely below 15 RPM)
+				time.Sleep(10 * time.Second)
 			}
-		}(w) // ✅
-	} // ✅
+		}(w)
+	}
 
-	wg.Wait() // ✅ Block main thread execution context until all parallel channels wrap up cleanly
+	wg.Wait()
 	fmt.Println("🎉 Verification backlog processing complete!")
 }
 
@@ -186,7 +218,7 @@ func evaluateQuestionWithPro(ctx context.Context, client *genai.Client, systemIn
 		},
 	}
 
-	resp, err := client.Models.GenerateContent(ctx, "gemini-2.5-pro",
+	resp, err := client.Models.GenerateContent(ctx, "gemini-2.5-flash",
 		[]*genai.Content{
 			&genai.Content{
 				Role: "user",
