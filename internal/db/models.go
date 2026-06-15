@@ -25,11 +25,15 @@ type DerivedChoice struct {
 type DerivedQuestion struct {
 	ID                 int64
 	OriginalQuestionID pgtype.Int8
+	SubjectID          pgtype.Int8
 	LevelType          pgtype.Int8
+	SkillsTested       pgtype.Text
 	QuestionText       string
 	CorrectChoice      string
 	Explanation        string
 	CreatedAt          pgtype.Timestamp
+	ConfidenceScore    pgtype.Numeric
+	IsVerified         bool
 }
 
 type InstructionContext struct {
@@ -55,9 +59,11 @@ type Question struct {
 	CorrectChoice        string
 	Explanation          string
 	CreatedAt            pgtype.Timestamp
+	IsDerivable          bool
 	IsVerified           bool
-	IsSolvable           pgtype.Bool
+	IsSolvable           bool
 	ConfidenceScore      pgtype.Numeric
+	DerivationIssue      pgtype.Text
 }
 
 type Source struct {

@@ -5,7 +5,7 @@ go 1.25.7
 require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/joho/godotenv v1.5.1
-	google.golang.org/genai v1.57.0
+	google.golang.org/genai v1.60.0
 )
 
 require (

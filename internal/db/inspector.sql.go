@@ -71,7 +71,7 @@ type UpdateQuestionVerificationParams struct {
 	ID              int64
 	CorrectChoice   string
 	Explanation     string
-	IsSolvable      pgtype.Bool
+	IsSolvable      bool
 	ConfidenceScore pgtype.Numeric
 }
 
