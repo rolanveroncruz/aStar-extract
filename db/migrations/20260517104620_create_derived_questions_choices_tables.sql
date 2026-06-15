@@ -9,11 +9,16 @@ CREATE TABLE level_types( -- levels of difficulty e.g. easy, medium, hard
 CREATE TABLE derived_questions (
     id BIGSERIAL PRIMARY KEY,
     original_question_id BIGINT REFERENCES  questions(id) ON DELETE SET NULL ,
+    subject_id BIGINT REFERENCES subjects(id),
     level_type BIGINT REFERENCES level_types(id),
+    skills_tested TEXT,
     question_text TEXT NOT NULL,
     correct_choice TEXT NOT NULL,
     explanation TEXT NOT NULL DEFAULT '',
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    confidence_score NUMERIC (4,3),
+    is_verified BOOLEAN NOT NULL DEFAULT FALSE
+
 );
 CREATE INDEX idx_derived_questions_original ON derived_questions(original_question_id);
 
