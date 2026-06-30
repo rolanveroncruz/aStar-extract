@@ -29,9 +29,9 @@ import (
 type DerivedQuestion struct {
 	Difficulty    string   `json:"difficulty"`
 	QuestionText  string   `json:"question_text"`
+	Choices       []string `json:"choices"`
 	CorrectChoice string   `json:"correct_choice"`
 	Explanation   string   `json:"explanation"`
-	Choices       []string `json:"choices"`
 }
 
 type GeneratorResponse struct {
@@ -48,8 +48,10 @@ type Job struct {
 }
 
 func main() {
+	//godotenv.Load() loads and injects keys not already defined by env.
+	// gotdotenv.Overload() loads and overwrites env definitions.
 	if err := godotenv.Overload(); err != nil {
-		log.Println("Note: No .env file found or overridden, relying on environment settings")
+		log.Println("Note: No .env file found, relying on environment settings")
 	}
 
 	ctx := context.Background()
@@ -84,9 +86,11 @@ func main() {
 		log.Fatalf("Failed to initialize Gemini client: %v", err)
 	}
 
-	// 4. Fetch the backlog for Math (1), Science (2), and Language (3)
-	targetSubjects := []int64{1, 2, 3}
+	// 4. Fetch the backlog for Math (1), Science (186), and Language Proficiency (113)
+	targetSubjects := []int64{1, 186, 3}
 	var backlog []Job
+
+	// For each of the subjects, we get 75 questions.
 
 	for _, sid := range targetSubjects {
 		qs, err := queries.GetPendingQuestions(ctx, sid)
@@ -116,7 +120,7 @@ func main() {
 	   Worker Pool Initialization
 	   ================================================================= */
 	var completedCount int64 = 0
-	numWorkers := 2 // Free Tier Pacing
+	numWorkers := 3 // Pacing
 	jobs := make(chan Job, totalQuestions)
 	var wg sync.WaitGroup
 

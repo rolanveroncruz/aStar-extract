@@ -5,7 +5,8 @@ FROM questions q
 WHERE q.subject_id = $1
   AND q.is_derivable = true
   AND dq.id IS NULL
-LIMIT 50;
+ORDER BY random()
+LIMIT 75;
 
 -- name: GetChoicesForQuestion :many
 SELECT choice_letter, choice_text
